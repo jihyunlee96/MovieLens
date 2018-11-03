@@ -25,6 +25,7 @@ public class Recommender
 
 	PropertiesConfiguration config ;
 	int minSupport ;
+	int min_evidence_2 = 3;
 	int min_evidence_3 ;
 	double confidence_threshold_rulesize_2 ;
 	double confidence_threshold_rulesize_3 ;
@@ -65,17 +66,23 @@ public class Recommender
 
 	private void computeFreqItemsetsWithSize1(HashSet<Integer> aBasket) {
 		
+		// basket 전체 돌면서, item이 몇 번 나오는지 카운트
 		for (Integer item : aBasket) {
+			// item에 해당되는 count retrieve 하기
 			Integer count = countForAllItemsetsWithSize1.get(item) ;
+			// 처음 나오는 item이라면, 카운트를 1로 설정
 			if (count == null)
 				count = 1 ;
+			// 이미 나왔던 item이라면, 카운트 ++
 			else
 				count = count.intValue() + 1 ;
+			// 업데이트 된 정보 넣기
 			countForAllItemsetsWithSize1.put(item, count) ; // the item is updated with new count.
 		}
 		
+		// 아이템을 다 한번씩 돌면서
 		for(Integer item:countForAllItemsetsWithSize1.keySet()) {
-			
+			// minSupport보다 크다면, freqItemsetsWithSize1에 넣기
 			if(countForAllItemsetsWithSize1.get(item)>=minSupport)
 				freqItemsetsWithSize1.put(item, countForAllItemsetsWithSize1.get(item));
 		}
@@ -84,8 +91,10 @@ public class Recommender
 	private void computeFreqItemsetsWithSize2(HashSet<Integer> aBasket) {
 		
 		HashSet<Integer> allItemsetsWithSize1ThatSatisfyMinSupportInTheBasket = new HashSet<Integer>() ;
+		// Basket의 아이템 다 돌면서,
 		for (Integer item : aBasket) {
 			// We only need to consider items in the frequent itemsets with Size 1. => Using monotonicity to improve this algorithm
+			// freqItemsetsWithSize1에 있는 item을 넣기
 			if (freqItemsetsWithSize1.containsKey(item))
 				allItemsetsWithSize1ThatSatisfyMinSupportInTheBasket.add(item) ;
 		}
@@ -93,6 +102,7 @@ public class Recommender
 		aBasket = allItemsetsWithSize1ThatSatisfyMinSupportInTheBasket;
 		
 		// it is obvious that aBasket must have at least two items for computing its frequency.
+		// freqItemsetsWithSize1이 2보다 같거나 크다면
 		if (aBasket.size() >= 2) {
 			
 			// Sets.combinations is a public method from a google's common collection package.
@@ -100,12 +110,17 @@ public class Recommender
 			// for example, when we have the first parameter value {1,2,3} and the value of the second parameter '2',
 			// it returns all subsets from the combinations with the given size {{1,2},{1,3},{2,3}}.
 			// Note that the order of items mat not be ordered by item ids but the order is sorted when ItemsetWithSize2 is instantiated.
+			// 설정한 aBasket의 사이즈 2인 조합을 일일히 돌면서
 			for (Set<Integer> aSubsetWithTwoItems : Sets.combinations(aBasket, 2)) {
+				// 생성자는 멤버를 sorting해주는 용도
 				Integer count = countForAllItemsetsWithSize2.get(new FrequentItemsetSize2(aSubsetWithTwoItems)) ;
+				// 아직 두 가지의 조합이 한 번도 안 나왔다면, 카운트를 1로 줌
 				if (count == null) 
 					count = 1 ;
 				else
+				// 나온적이 있다면, 카운트 업데이트
 					count = count.intValue() + 1 ;
+				// 업데이트한 값을 넣기
 				countForAllItemsetsWithSize2.put(new FrequentItemsetSize2(aSubsetWithTwoItems), count) ;
 			}
 			
@@ -117,7 +132,7 @@ public class Recommender
 		}
 	}
 
-	private void computeFreqItemsetsWithSize3(HashSet<Integer> aBasket) {
+private void computeFreqItemsetsWithSize3(HashSet<Integer> aBasket) {
 		
 		// Naively using monotonicity to improve efficiency of this algorithm
 		// Based on slides, we could apply monotonicity for itemsets with Size 2 but we did this with Itemsets with Size 1 for simplicity.
@@ -153,38 +168,103 @@ public class Recommender
 	private int predictPair(HashSet<Integer> anItemset, Integer j) {
 		/* TODO: implement this method */
 		
-		// Compute support, confidence, or lift. Based on their threshold, decide how to predict. Return 1 when metrics are satisfied by threshold, otherwise 0.
-		return 0 ;
+		// only consider the case whose itemset size is >=1 since this method deals with {movie 1} -> {movie 2} rules
+		// 0 리턴할 확률 거의 없을 듯
+		if (anItemset.size() < 1)
+			return 0 ;
+
+		// Compute support, confidence, or lift. Based on their threshold, decide how to predict. Return 1 when metrics are satisfied by thresholds, otherwise 0.
+		// In the current implementation, we considered only confidence.
+		int evidence = 0 ;
+		// itemSet의 모든 원소를 돌기
+		for (int p : anItemset) {
+			
+			// the number baskets for I
+			// 해당 조합의 카운트 retrieve
+			Integer numBasketsForI = freqItemsetsWithSize1.get(p) ;
+			// 카운트가 한번도 없다면, 넘기기
+			if (numBasketsForI == null)
+				continue ;
+			
+			// the number of baskets for I U {j}
+			// 현재 고려하는 size 2 combination을 assocRule에다가 넣고,
+			TreeSet<Integer> assocRule = new TreeSet<Integer>() ;
+			assocRule.add(p);
+			// j도 넣기
+			assocRule.add(j) ;
+			// size 2 combination + j를 item으로 넣기
+			FrequentItemsetSize2 item = new FrequentItemsetSize2(assocRule) ;	
+			// 이렇게 원소 3개인 set의 카운트를 retrieve 하기
+			Integer numBasketsForIUnionj = freqItemsetsWithSize2.get(item) ; // All itemsets in freqItemsetsWithSize3 satisfy minimum support when the are computed.
+			// count가 0이면 넘기기
+			if (numBasketsForIUnionj == null)
+				continue ;
+			
+			// compute confidence: The confidence of the rule I -> j is the ratio of the number of baskets for I U {j} and the number of baskets for I.
+			double confidence = (double) numBasketsForIUnionj / numBasketsForI;
+			
+			if (confidence >= 0.98) {
+				System.out.println(p + " " + j);
+				
+				System.out.println("confidence: " + confidence);
+			}
+			
+				if (confidence >= confidence_threshold_rulesize_2) 
+				evidence++ ;
+		}
+
+		if (evidence >= min_evidence_2) 
+			return 1 ;
+
+		return 0 ;	
 	}
 
 	private int predictTriple(HashSet<Integer> anItemset, Integer j) { // association rule anItemset (I) -> j
 		
 		// only consider the case whose itemset size is >=2 since this method deals with {movie 1, movie 2} -> {movie 3} rules
+		// 0 리턴할 확률 거의 없을 듯
 		if (anItemset.size() < 2)
 			return 0 ;
 
 		// Compute support, confidence, or lift. Based on their threshold, decide how to predict. Return 1 when metrics are satisfied by thresholds, otherwise 0.
 		// In the current implementation, we considered only confidence.
 		int evidence = 0 ;
+		// itemSet의 모든 size 2 combination을 돌기
 		for (Set<Integer> p : Sets.combinations(anItemset, 2)) {
 			
 			// the number baskets for I
+			// 해당 조합의 카운트 retrieve
 			Integer numBasketsForI = freqItemsetsWithSize2.get(new FrequentItemsetSize2(p)) ;
-			
+			// 카운트가 한번도 없다면, 넘기기
 			if (numBasketsForI == null)
 				continue ;
 			
 			// the number of baskets for I U {j}
+			// 현재 고려하는 size 2 combination을 assocRule에다가 넣고,
 			TreeSet<Integer> assocRule = new TreeSet<Integer>(p) ;
+			// j도 넣기
 			assocRule.add(j) ;
+			// size 2 combination + j를 item으로 넣기
 			FrequentItemsetSize3 item = new FrequentItemsetSize3(assocRule) ;	
+			// 이렇게 원소 3개인 set의 카운트를 retrieve 하기
 			Integer numBasketsForIUnionj = freqItemsetsWithSize3.get(item) ; // All itemsets in freqItemsetsWithSize3 satisfy minimum support when the are computed.
+			// count가 0이면 넘기기
 			if (numBasketsForIUnionj == null)
 				continue ;
 			
 			// compute confidence: The confidence of the rule I -> j is the ratio of the number of baskets for I U {j} and the number of baskets for I.
 			double confidence = (double) numBasketsForIUnionj / numBasketsForI;
 		
+			if (confidence > 0.98) {
+		        Iterator<Integer> itr = p.iterator();
+
+		        while (itr.hasNext()) {
+		            System.out.print(itr.next() + " ");
+		        }
+				System.out.println(j);
+				System.out.println("confidence: " + confidence);
+			}
+			
 			if (confidence >= confidence_threshold_rulesize_3) 
 				evidence++ ;
 		}
@@ -243,17 +323,73 @@ class FrequentItemsetSize2 implements Comparable
 @SuppressWarnings("rawtypes")
 class FrequentItemsetSize3 implements Comparable 
 {
-	int [] items ;
+	int [] items = new int[3];
 
 	FrequentItemsetSize3(Set<Integer> s) {
 		/* TODO: implement this method */
-		
 		// values in s must be sorted and save into items array
+		Integer [] elem = s.toArray(new Integer[3]) ;
+		
+		if (elem[0] < elem[1]) {
+			if (elem[1] < elem[2]) {
+				items[0] = elem[0];
+				items[1] = elem[1];
+				items[2] = elem[2];
+			}
+			// elem[2] < elem[1]
+			else {
+				if (elem[0] < elem[2]) {
+					items[0] = elem[0];
+					items[1] = elem[2];
+					items[2] = elem[1];
+				}
+				// elem[2] < elem[0]
+				else {
+					items[0] = elem[2];
+					items[1] = elem[0];
+					items[2] = elem[1];
+				}
+			}
+		}
+		// elem[1] < elem[0]
+		else {
+			if (elem[0] < elem[2]) {
+				items[0] = elem[1];
+				items[1] = elem[0];
+				items[2] = elem[2];
+			}
+			// elem[2] < elem[0]
+			else {
+				if (elem[1] < elem[2]) {
+					items[0] = elem[1];
+					items[1] = elem[2];
+					items[2] = elem[0];
+				}
+				
+				else {
+					items[0] = elem[2];
+					items[1] = elem[1];
+					items[2] = elem[0];
+				}
+			}
+		}
 	}
 
 	@Override
 	public int compareTo(Object obj) {  // this method is used for sorting when using TreeMap
 		/* TODO: implement this method */
-		return 0 ;
+		FrequentItemsetSize3 p = (FrequentItemsetSize3) obj ;
+
+		if (this.items[0] < p.items[0]) 
+			return -1 ;
+		if (this.items[0] > p.items[0])
+			return 1 ;
+		
+		if (this.items[1] < p.items[1]) 
+			return -1 ;
+		if (this.items[1] > p.items[1])
+			return 1 ;
+		
+		return (this.items[2] - p.items[2]) ;		
 	}
 }
